@@ -10,10 +10,12 @@ import (
 	"io"
 	"time"
 
+	"github.com/cortexproject/cortex/pkg/chunk"
+	"github.com/pkg/errors"
+
 	"github.com/grafana/loki/pkg/iter"
 	"github.com/grafana/loki/pkg/logproto"
 	"github.com/grafana/loki/pkg/logql"
-	"github.com/pkg/errors"
 )
 
 const blocksPerChunk = 10
@@ -41,6 +43,8 @@ func newCRC32() hash.Hash32 {
 
 // MemChunk implements compressed log chunks.
 type MemChunk struct {
+	tags chunk.TagMatchers
+
 	// The number of uncompressed bytes per block.
 	blockSize int
 
@@ -79,12 +83,12 @@ func (hb *headBlock) isEmpty() bool {
 	return len(hb.entries) == 0
 }
 
-func (hb *headBlock) append(ts int64, line string) error {
+func (hb *headBlock) append(ts int64, line, tags string) error {
 	if !hb.isEmpty() && hb.maxt > ts {
 		return ErrOutOfOrder
 	}
 
-	hb.entries = append(hb.entries, entry{ts, line})
+	hb.entries = append(hb.entries, entry{ts, line, tags})
 	if hb.mint == 0 || hb.mint > ts {
 		hb.mint = ts
 	}
@@ -123,14 +127,16 @@ func (hb *headBlock) serialise(pool CompressionPool) ([]byte, error) {
 }
 
 type entry struct {
-	t int64
-	s string
+	t    int64
+	s    string
+	tags string
 }
 
 // NewMemChunkSize returns a new in-mem chunk.
 // Mainly for config push size.
 func NewMemChunkSize(enc Encoding, blockSize int) *MemChunk {
 	c := &MemChunk{
+		tags:      chunk.TagMatchers{},
 		blockSize: blockSize, // The blockSize in bytes.
 		blocks:    []block{},
 
@@ -157,6 +163,7 @@ func NewMemChunk(enc Encoding) *MemChunk {
 // NewByteChunk returns a MemChunk on the passed bytes.
 func NewByteChunk(b []byte) (*MemChunk, error) {
 	bc := &MemChunk{
+		tags:     chunk.TagMatchers{},
 		cPool:    &Gzip,
 		encoding: EncGZIP,
 		head:     &headBlock{}, // Dummy, empty headblock.
@@ -217,6 +224,10 @@ func NewByteChunk(b []byte) (*MemChunk, error) {
 	}
 
 	return bc, nil
+}
+
+func (c *MemChunk) Tags() chunk.TagMatchers {
+	return c.tags
 }
 
 // Bytes implements Chunk.
@@ -346,7 +357,9 @@ func (c *MemChunk) Append(entry *logproto.Entry) error {
 		return ErrOutOfOrder
 	}
 
-	if err := c.head.append(entryTimestamp, entry.Line); err != nil {
+	c.tags.AppendString(entry.Tags)
+
+	if err := c.head.append(entryTimestamp, entry.Line, entry.Tags); err != nil {
 		return err
 	}
 
@@ -468,7 +481,6 @@ func (hb *headBlock) iterator(mint, maxt int64, filter logql.Filter) iter.EntryI
 
 	return &listIterator{
 		entries: entries,
-		cur:     -1,
 	}
 }
 
@@ -486,11 +498,11 @@ func (li *listIterator) Next() bool {
 }
 
 func (li *listIterator) Entry() logproto.Entry {
-	if li.cur < 0 || li.cur >= len(li.entries) {
+	if li.cur < 0 || li.cur > len(li.entries) {
 		return logproto.Entry{}
 	}
 
-	cur := li.entries[li.cur]
+	cur := li.entries[li.cur-1]
 
 	return logproto.Entry{
 		Timestamp: time.Unix(0, cur.t),

@@ -9,13 +9,14 @@ import (
 	"strings"
 	"sync"
 
-	prom_chunk "github.com/cortexproject/cortex/pkg/chunk/encoding"
-	"github.com/cortexproject/cortex/pkg/prom1/storage/metric"
 	"github.com/golang/snappy"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/pkg/errors"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/pkg/labels"
+
+	prom_chunk "github.com/cortexproject/cortex/pkg/chunk/encoding"
+	"github.com/cortexproject/cortex/pkg/prom1/storage/metric"
 
 	errs "github.com/weaveworks/common/errors"
 )
@@ -45,6 +46,7 @@ type Chunk struct {
 	From    model.Time    `json:"from"`
 	Through model.Time    `json:"through"`
 	Metric  labels.Labels `json:"metric"`
+	Tags    TagMatchers   `json:"-"`
 
 	// The hash is not written to the external storage either.  We use
 	// crc32, Castagnoli table.  See http://www.evanjones.ca/crc32c.html.
@@ -66,13 +68,21 @@ type Chunk struct {
 }
 
 // NewChunk creates a new chunk
-func NewChunk(userID string, fp model.Fingerprint, metric labels.Labels, c prom_chunk.Chunk, from, through model.Time) Chunk {
+func NewChunk(
+	userID string,
+	fp model.Fingerprint,
+	metric labels.Labels,
+	tags TagMatchers,
+	c prom_chunk.Chunk,
+	from, through model.Time,
+) Chunk {
 	return Chunk{
 		Fingerprint: fp,
 		UserID:      userID,
 		From:        from,
 		Through:     through,
 		Metric:      metric,
+		Tags:        tags,
 		Encoding:    c.Encoding(),
 		Data:        c,
 	}
@@ -288,7 +298,9 @@ func (c *Chunk) Decode(decodeContext *DecodeContext, input []byte) error {
 	if err != nil {
 		return errors.Wrap(err, "when decoding chunk metadata")
 	}
-	if len(input)-r.Len() != int(metadataLen) {
+	metadataRead := len(input) - r.Len()
+	// Older versions of Cortex included the initial length word; newer versions do not.
+	if !(metadataRead == int(metadataLen) || metadataRead == int(metadataLen)+4) {
 		return ErrMetadataLength
 	}
 

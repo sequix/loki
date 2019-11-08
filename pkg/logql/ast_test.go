@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cortexproject/cortex/pkg/chunk"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/prometheus/prometheus/pkg/labels"
@@ -33,6 +34,27 @@ func Test_logSelectorExpr_String(t *testing.T) {
 	}
 }
 
+func Test_logSelectorExpr_String2(t *testing.T) {
+	t.Parallel()
+
+	testLogSelectorExprHelper(t, `{ foo !~ "bar" } / foo ="bar" /`, `{foo!~"bar"}/foo="bar"/`)
+	testLogSelectorExprHelper(t, `/foo="bar", bar="baz"/{foo!~"bar"}`, `{foo!~"bar"}/foo="bar",bar="baz"/`)
+	testLogSelectorExprHelper(t, `/ foo="bar", bar="baz" /`, `/foo="bar",bar="baz"/`)
+}
+
+func testLogSelectorExprHelper(t *testing.T, query, want string) {
+	t.Helper()
+
+	expr, err := ParseLogSelector(query)
+	if err != nil {
+		t.Fatalf("failed to parse log selector: %s", err)
+	}
+
+	if got := expr.String(); got != want {
+		t.Fatalf("error expected: %s got: %s", want, got)
+	}
+}
+
 type linecheck struct {
 	l string
 	e bool
@@ -41,14 +63,15 @@ type linecheck struct {
 func Test_FilterMatcher(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {
-		q string
-
-		expectedMatchers []*labels.Matcher
+		q                   string
+		expectedTagMatchers []*chunk.TagMatcher
+		expectedMatchers    []*labels.Matcher
 		// test line against the resulting filter, if empty filter should also be nil
 		lines []linecheck
 	}{
 		{
 			`{app="foo",cluster=~".+bar"}`,
+			nil,
 			[]*labels.Matcher{
 				mustNewMatcher(labels.MatchEqual, "app", "foo"),
 				mustNewMatcher(labels.MatchRegexp, "cluster", ".+bar"),
@@ -57,6 +80,7 @@ func Test_FilterMatcher(t *testing.T) {
 		},
 		{
 			`{app!="foo",cluster=~".+bar",bar!~".?boo"}`,
+			nil,
 			[]*labels.Matcher{
 				mustNewMatcher(labels.MatchNotEqual, "app", "foo"),
 				mustNewMatcher(labels.MatchRegexp, "cluster", ".+bar"),
@@ -66,6 +90,7 @@ func Test_FilterMatcher(t *testing.T) {
 		},
 		{
 			`{app="foo"} |= "foo"`,
+			nil,
 			[]*labels.Matcher{
 				mustNewMatcher(labels.MatchEqual, "app", "foo"),
 			},
@@ -73,6 +98,7 @@ func Test_FilterMatcher(t *testing.T) {
 		},
 		{
 			`{app="foo"} |= "foo" != "bar"`,
+			nil,
 			[]*labels.Matcher{
 				mustNewMatcher(labels.MatchEqual, "app", "foo"),
 			},
@@ -80,6 +106,7 @@ func Test_FilterMatcher(t *testing.T) {
 		},
 		{
 			`{app="foo"} |= "foo" !~ "f.*b"`,
+			nil,
 			[]*labels.Matcher{
 				mustNewMatcher(labels.MatchEqual, "app", "foo"),
 			},
@@ -87,10 +114,22 @@ func Test_FilterMatcher(t *testing.T) {
 		},
 		{
 			`{app="foo"} |= "foo" |~ "f.*b"`,
+			nil,
 			[]*labels.Matcher{
 				mustNewMatcher(labels.MatchEqual, "app", "foo"),
 			},
 			[]linecheck{{"foo", false}, {"bar", false}, {"foobar", true}},
+		},
+		{
+			`{app="foo"}/foo="bar",bar="baz"/ |= "foo"`,
+			[]*chunk.TagMatcher{
+				mustNewTagMatcher("foo", "bar"),
+				mustNewTagMatcher("bar", "baz"),
+			},
+			[]*labels.Matcher{
+				mustNewMatcher(labels.MatchEqual, "app", "foo"),
+			},
+			[]linecheck{{"foo", false}, {"bar", false}, {"barbaz", false}, {"foobarbaz", true}},
 		},
 	} {
 		tt := tt
@@ -99,8 +138,11 @@ func Test_FilterMatcher(t *testing.T) {
 			expr, err := ParseLogSelector(tt.q)
 			assert.Nil(t, err)
 			assert.Equal(t, tt.expectedMatchers, expr.Matchers())
+			assert.Equal(t, tt.expectedTagMatchers, expr.Tags())
+
 			f, err := expr.Filter()
 			assert.Nil(t, err)
+
 			if tt.lines == nil {
 				assert.Nil(t, f)
 			} else {

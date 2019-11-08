@@ -7,8 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/grafana/loki/pkg/logproto"
 	"github.com/stretchr/testify/require"
+
+	"github.com/grafana/loki/pkg/logproto"
 )
 
 // covers requests to /api/prom/push
@@ -23,6 +24,7 @@ var pushTests = []struct {
 					{
 						Timestamp: mustParse(time.RFC3339Nano, "2019-09-13T18:32:22.380001319Z"),
 						Line:      "super line",
+						Tags:      `/request_id="123"/`,
 					},
 				},
 				Labels: `{test="test"}`,
@@ -34,6 +36,7 @@ var pushTests = []struct {
 					"labels":"{test=\"test\"}",
 					"entries":[
 						{
+    						"tags": "/request_id=\"123\"/",
 							"ts": "2019-09-13T18:32:22.380001319Z",
 							"line": "super line"	
 						}

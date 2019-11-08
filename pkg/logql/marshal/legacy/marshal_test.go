@@ -7,10 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	loghttp "github.com/grafana/loki/pkg/loghttp/legacy"
 	"github.com/grafana/loki/pkg/logproto"
 	"github.com/grafana/loki/pkg/logql"
-	"github.com/stretchr/testify/require"
 )
 
 // covers responses from /api/prom/query
@@ -25,6 +26,7 @@ var queryTests = []struct {
 					{
 						Timestamp: mustParse(time.RFC3339Nano, "2019-09-13T18:32:22.380001319Z"),
 						Line:      "super line",
+						Tags:      `/foo="bar"/`,
 					},
 				},
 				Labels: `{test="test"}`,
@@ -37,7 +39,8 @@ var queryTests = []struct {
 					"entries":[
 						{
 							"ts": "2019-09-13T18:32:22.380001319Z",
-							"line": "super line"	
+							"line": "super line",
+							"tags": "/foo=\"bar\"/"
 						}
 					]
 				}
@@ -95,7 +98,8 @@ var tailTests = []struct {
 					"entries": [
 						{
 							"ts": "2019-09-13T18:32:22.380001319Z",
-							"line": "super line"	
+							"line": "super line",
+							"tags": ""
 						}
 					]
 				}
@@ -103,7 +107,8 @@ var tailTests = []struct {
 			"dropped_entries": [
 				{
 					"Timestamp": "2019-09-13T18:32:22.380001319Z",
-					"Labels": "{test=\"test\"}"
+					"Labels": "{test=\"test\"}",
+					"tags": ""
 				}
 			]
 		}`,

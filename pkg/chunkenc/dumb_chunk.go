@@ -4,6 +4,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/cortexproject/cortex/pkg/chunk"
+
 	"github.com/grafana/loki/pkg/iter"
 	"github.com/grafana/loki/pkg/logproto"
 	"github.com/grafana/loki/pkg/logql"
@@ -20,6 +22,14 @@ func NewDumbChunk() Chunk {
 
 type dumbChunk struct {
 	entries []logproto.Entry
+}
+
+func (c *dumbChunk) Tags() chunk.TagMatchers {
+	t := chunk.TagMatchers{}
+	for _, e := range c.entries {
+		t.AppendString(e.Tags)
+	}
+	return t
 }
 
 func (c *dumbChunk) Bounds() (time.Time, time.Time) {

@@ -4,6 +4,7 @@ package logql
 import (
   "time"
   "github.com/prometheus/prometheus/pkg/labels"
+  "github.com/cortexproject/cortex/pkg/chunk"
 )
 %}
 
@@ -16,9 +17,12 @@ import (
   LogRangeExpr            *logRange
   Matcher                 *labels.Matcher
   Matchers                []*labels.Matcher
+  TagMatcher              *chunk.TagMatcher
+  TagMatchers             []*chunk.TagMatcher
   RangeAggregationExpr    SampleExpr
   RangeOp                 string
   Selector                []*labels.Matcher
+  TagSelector             []*chunk.TagMatcher
   VectorAggregationExpr   SampleExpr
   VectorOp                string
   str                     string
@@ -33,18 +37,22 @@ import (
 %type <Grouping>              grouping
 %type <Labels>                labels
 %type <LogExpr>               logExpr
+%type <LogExpr>               selectorWrapper
 %type <LogRangeExpr>          logRangeExpr
 %type <Matcher>               matcher
 %type <Matchers>              matchers
+%type <TagMatcher>            tagMatcher
+%type <TagMatchers>           tagMatchers
 %type <RangeAggregationExpr>  rangeAggregationExpr
 %type <RangeOp>               rangeOp
 %type <Selector>              selector
+%type <TagSelector>           tagSelector
 %type <VectorAggregationExpr> vectorAggregationExpr
 %type <VectorOp>              vectorOp
 
 %token <str>      IDENTIFIER STRING
 %token <duration> DURATION
-%token <val>      MATCHERS LABELS EQ NEQ RE NRE OPEN_BRACE CLOSE_BRACE OPEN_BRACKET CLOSE_BRACKET COMMA DOT PIPE_MATCH PIPE_EXACT
+%token <val>      MATCHERS LABELS EQ NEQ RE NRE OPEN_BRACE CLOSE_BRACE OPEN_BRACKET CLOSE_BRACKET COMMA DOT PIPE_MATCH PIPE_EXACT SLASH
                   OPEN_PARENTHESIS CLOSE_PARENTHESIS BY WITHOUT COUNT_OVER_TIME RATE SUM AVG MAX MIN COUNT STDDEV STDVAR BOTTOMK TOPK
 
 %%
@@ -58,13 +66,12 @@ expr:
     ;
 
 logExpr:
-      selector                                    { $$ = newMatcherExpr($1)}
+      selectorWrapper                             { $$ = $1 }
     | logExpr filter STRING                       { $$ = NewFilterExpr( $1, $2, $3 ) }
-    | OPEN_PARENTHESIS logExpr CLOSE_PARENTHESIS  { $$ = $2}
+    | OPEN_PARENTHESIS logExpr CLOSE_PARENTHESIS  { $$ = $2 }
     | logExpr filter error
     | logExpr error
     ;
-
 
 logRangeExpr: logExpr DURATION { $$ = mustNewRange($1, $2) };
 
@@ -93,6 +100,13 @@ filter:
     | NEQ                              { $$ = labels.MatchNotEqual }
     ;
 
+selectorWrapper:
+      selector             { $$ = newRootExpr($1, nil) }
+    | tagSelector          { $$ = newRootExpr(nil, $1) }
+    | selector tagSelector { $$ = newRootExpr($1, $2) }
+    | tagSelector selector { $$ = newRootExpr($2, $1) }
+    ;
+
 selector:
       OPEN_BRACE matchers CLOSE_BRACE  { $$ = $2 }
     | OPEN_BRACE matchers error        { $$ = $2 }
@@ -109,6 +123,21 @@ matcher:
     | IDENTIFIER NEQ STRING            { $$ = mustNewMatcher(labels.MatchNotEqual, $1, $3) }
     | IDENTIFIER RE STRING             { $$ = mustNewMatcher(labels.MatchRegexp, $1, $3) }
     | IDENTIFIER NRE STRING            { $$ = mustNewMatcher(labels.MatchNotRegexp, $1, $3) }
+    ;
+
+tagSelector:
+      SLASH tagMatchers SLASH  { $$ = $2 }
+    | SLASH tagMatchers error  { $$ = $2 }
+    | SLASH error SLASH        { }
+    ;
+
+tagMatchers:
+      tagMatcher                      { $$ = []*chunk.TagMatcher{ $1 } }
+    | tagMatchers COMMA tagMatcher    { $$ = append($1, $3) }
+    ;
+
+tagMatcher:
+      IDENTIFIER EQ STRING            { $$ = mustNewTagMatcher($1, $3) }
     ;
 
 vectorOp:

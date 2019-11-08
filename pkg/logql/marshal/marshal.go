@@ -7,11 +7,13 @@ import (
 	"io"
 
 	"github.com/gorilla/websocket"
+
 	"github.com/grafana/loki/pkg/loghttp"
 	legacy "github.com/grafana/loki/pkg/loghttp/legacy"
 
-	"github.com/grafana/loki/pkg/logproto"
 	"github.com/prometheus/prometheus/promql"
+
+	"github.com/grafana/loki/pkg/logproto"
 )
 
 // WriteQueryResponseJSON marshals the promql.Value to v1 loghttp JSON and then writes it to the provided io.Writer
@@ -38,6 +40,10 @@ func WriteQueryResponseJSON(v promql.Value, w io.Writer) error {
 //  Note that it simply directly marshals the value passed in.  This is because the label currently marshals
 //  cleanly to the v1 http protocol.  If this ever changes, it will be caught by testing.
 func WriteLabelResponseJSON(l logproto.LabelResponse, w io.Writer) error {
+	return json.NewEncoder(w).Encode(l)
+}
+
+func WriteTagResponseJSON(l logproto.TagResponse, w io.Writer) error {
 	return json.NewEncoder(w).Encode(l)
 }
 

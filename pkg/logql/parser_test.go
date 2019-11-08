@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cortexproject/cortex/pkg/chunk"
 	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/stretchr/testify/require"
 )
@@ -21,29 +22,44 @@ func TestParse(t *testing.T) {
 	}{
 		{
 			in:  `{foo="bar"}`,
-			exp: &matchersExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchEqual, "foo", "bar")}},
+			exp: &rootExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchEqual, "foo", "bar")}},
+		},
+		{
+			in:  `/foo="bar"/`,
+			exp: &rootExpr{tags: []*chunk.TagMatcher{mustNewTagMatcher("foo", "bar")}},
 		},
 		{
 			in:  `{ foo = "bar" }`,
-			exp: &matchersExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchEqual, "foo", "bar")}},
+			exp: &rootExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchEqual, "foo", "bar")}},
+		},
+		{
+			in:  `/ foo = "bar" /`,
+			exp: &rootExpr{tags: []*chunk.TagMatcher{mustNewTagMatcher("foo", "bar")}},
 		},
 		{
 			in:  `{ foo != "bar" }`,
-			exp: &matchersExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchNotEqual, "foo", "bar")}},
+			exp: &rootExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchNotEqual, "foo", "bar")}},
 		},
 		{
 			in:  `{ foo =~ "bar" }`,
-			exp: &matchersExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchRegexp, "foo", "bar")}},
+			exp: &rootExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchRegexp, "foo", "bar")}},
 		},
 		{
 			in:  `{ foo !~ "bar" }`,
-			exp: &matchersExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchNotRegexp, "foo", "bar")}},
+			exp: &rootExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchNotRegexp, "foo", "bar")}},
+		},
+		{
+			in: `{ foo !~ "bar" } / foo = "bar" /`,
+			exp: &rootExpr{
+				matchers: []*labels.Matcher{mustNewMatcher(labels.MatchNotRegexp, "foo", "bar")},
+				tags:     []*chunk.TagMatcher{mustNewTagMatcher("foo", "bar")},
+			},
 		},
 		{
 			in: `count_over_time({ foo !~ "bar" }[12m])`,
 			exp: &rangeAggregationExpr{
 				left: &logRange{
-					left:     &matchersExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchNotRegexp, "foo", "bar")}},
+					left:     &rootExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchNotRegexp, "foo", "bar")}},
 					interval: 12 * time.Minute,
 				},
 				operation: "count_over_time",
@@ -53,7 +69,7 @@ func TestParse(t *testing.T) {
 			in: `rate({ foo !~ "bar" }[5h])`,
 			exp: &rangeAggregationExpr{
 				left: &logRange{
-					left:     &matchersExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchNotRegexp, "foo", "bar")}},
+					left:     &rootExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchNotRegexp, "foo", "bar")}},
 					interval: 5 * time.Hour,
 				},
 				operation: "rate",
@@ -63,7 +79,7 @@ func TestParse(t *testing.T) {
 			in: `sum(rate({ foo !~ "bar" }[5h]))`,
 			exp: mustNewVectorAggregationExpr(&rangeAggregationExpr{
 				left: &logRange{
-					left:     &matchersExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchNotRegexp, "foo", "bar")}},
+					left:     &rootExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchNotRegexp, "foo", "bar")}},
 					interval: 5 * time.Hour,
 				},
 				operation: "rate",
@@ -73,7 +89,7 @@ func TestParse(t *testing.T) {
 			in: `avg(count_over_time({ foo !~ "bar" }[5h])) by (bar,foo)`,
 			exp: mustNewVectorAggregationExpr(&rangeAggregationExpr{
 				left: &logRange{
-					left:     &matchersExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchNotRegexp, "foo", "bar")}},
+					left:     &rootExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchNotRegexp, "foo", "bar")}},
 					interval: 5 * time.Hour,
 				},
 				operation: "count_over_time",
@@ -86,7 +102,7 @@ func TestParse(t *testing.T) {
 			in: `max without (bar) (count_over_time({ foo !~ "bar" }[5h]))`,
 			exp: mustNewVectorAggregationExpr(&rangeAggregationExpr{
 				left: &logRange{
-					left:     &matchersExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchNotRegexp, "foo", "bar")}},
+					left:     &rootExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchNotRegexp, "foo", "bar")}},
 					interval: 5 * time.Hour,
 				},
 				operation: "count_over_time",
@@ -99,7 +115,7 @@ func TestParse(t *testing.T) {
 			in: `topk(10,count_over_time({ foo !~ "bar" }[5h])) without (bar)`,
 			exp: mustNewVectorAggregationExpr(&rangeAggregationExpr{
 				left: &logRange{
-					left:     &matchersExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchNotRegexp, "foo", "bar")}},
+					left:     &rootExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchNotRegexp, "foo", "bar")}},
 					interval: 5 * time.Hour,
 				},
 				operation: "count_over_time",
@@ -112,7 +128,7 @@ func TestParse(t *testing.T) {
 			in: `bottomk(30 ,sum(rate({ foo !~ "bar" }[5h])) by (foo))`,
 			exp: mustNewVectorAggregationExpr(mustNewVectorAggregationExpr(&rangeAggregationExpr{
 				left: &logRange{
-					left:     &matchersExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchNotRegexp, "foo", "bar")}},
+					left:     &rootExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchNotRegexp, "foo", "bar")}},
 					interval: 5 * time.Hour,
 				},
 				operation: "rate",
@@ -126,7 +142,7 @@ func TestParse(t *testing.T) {
 			in: `max( sum(count_over_time({ foo !~ "bar" }[5h])) without (foo,bar) ) by (foo)`,
 			exp: mustNewVectorAggregationExpr(mustNewVectorAggregationExpr(&rangeAggregationExpr{
 				left: &logRange{
-					left:     &matchersExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchNotRegexp, "foo", "bar")}},
+					left:     &rootExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchNotRegexp, "foo", "bar")}},
 					interval: 5 * time.Hour,
 				},
 				operation: "count_over_time",
@@ -204,7 +220,7 @@ func TestParse(t *testing.T) {
 		},
 		{
 			in: `{ foo = "bar", bar != "baz" }`,
-			exp: &matchersExpr{matchers: []*labels.Matcher{
+			exp: &rootExpr{matchers: []*labels.Matcher{
 				mustNewMatcher(labels.MatchEqual, "foo", "bar"),
 				mustNewMatcher(labels.MatchNotEqual, "bar", "baz"),
 			}},
@@ -212,7 +228,7 @@ func TestParse(t *testing.T) {
 		{
 			in: `{foo="bar"} |= "baz"`,
 			exp: &filterExpr{
-				left:  &matchersExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchEqual, "foo", "bar")}},
+				left:  &rootExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchEqual, "foo", "bar")}},
 				ty:    labels.MatchEqual,
 				match: "baz",
 			},
@@ -223,7 +239,7 @@ func TestParse(t *testing.T) {
 				left: &filterExpr{
 					left: &filterExpr{
 						left: &filterExpr{
-							left:  &matchersExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchEqual, "foo", "bar")}},
+							left:  &rootExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchEqual, "foo", "bar")}},
 							ty:    labels.MatchEqual,
 							match: "baz",
 						},
@@ -245,7 +261,7 @@ func TestParse(t *testing.T) {
 						left: &filterExpr{
 							left: &filterExpr{
 								left: &filterExpr{
-									left:  &matchersExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchEqual, "foo", "bar")}},
+									left:  &rootExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchEqual, "foo", "bar")}},
 									ty:    labels.MatchEqual,
 									match: "baz",
 								},
@@ -269,7 +285,7 @@ func TestParse(t *testing.T) {
 						left: &filterExpr{
 							left: &filterExpr{
 								left: &filterExpr{
-									left:  &matchersExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchEqual, "foo", "bar")}},
+									left:  &rootExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchEqual, "foo", "bar")}},
 									ty:    labels.MatchEqual,
 									match: "baz",
 								},
@@ -299,7 +315,7 @@ func TestParse(t *testing.T) {
 						left: &filterExpr{
 							left: &filterExpr{
 								left: &filterExpr{
-									left:  &matchersExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchEqual, "foo", "bar")}},
+									left:  &rootExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchEqual, "foo", "bar")}},
 									ty:    labels.MatchEqual,
 									match: "baz",
 								},
@@ -331,7 +347,7 @@ func TestParse(t *testing.T) {
 								left: &filterExpr{
 									left: &filterExpr{
 										left: &filterExpr{
-											left:  &matchersExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchEqual, "foo", "bar")}},
+											left:  &rootExpr{matchers: []*labels.Matcher{mustNewMatcher(labels.MatchEqual, "foo", "bar")}},
 											ty:    labels.MatchEqual,
 											match: "baz",
 										},

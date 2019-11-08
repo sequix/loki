@@ -78,7 +78,7 @@ func (s *store) LazyQuery(ctx context.Context, req logql.SelectParams) (iter.Ent
 
 	matchers = append(matchers, nameLabelMatcher)
 	from, through := util.RoundToMilliseconds(req.Start, req.End)
-	chks, fetchers, err := s.GetChunkRefs(ctx, userID, from, through, matchers...)
+	chks, fetchers, err := s.GetChunkRefs(ctx, userID, from, through, matchers, expr.Tags())
 	if err != nil {
 		return nil, err
 	}

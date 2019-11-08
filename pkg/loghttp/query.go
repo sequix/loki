@@ -8,8 +8,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/grafana/loki/pkg/logproto"
 	"github.com/prometheus/common/model"
+
+	"github.com/grafana/loki/pkg/logproto"
 )
 
 var (
@@ -80,6 +81,7 @@ type Stream struct {
 type Entry struct {
 	Timestamp time.Time
 	Line      string
+	Tags      TagSet
 }
 
 // UnmarshalJSON implements the json.Unmarshaler interface.

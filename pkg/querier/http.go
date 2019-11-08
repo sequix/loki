@@ -3,6 +3,7 @@ package querier
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/grafana/loki/pkg/loghttp"
@@ -14,7 +15,6 @@ import (
 	"github.com/cortexproject/cortex/pkg/util"
 	"github.com/go-kit/kit/log/level"
 	"github.com/gorilla/websocket"
-	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/promql"
 	"github.com/weaveworks/common/httpgrpc"
 )
@@ -131,6 +131,32 @@ func (q *Querier) LabelHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// LabelHandler is a http.HandlerFunc for handling label queries.
+func (q *Querier) TagHandler(w http.ResponseWriter, r *http.Request) {
+	req, err := loghttp.ParseTagQuery(r)
+	if err != nil {
+		http.Error(w, httpgrpc.Errorf(http.StatusBadRequest, err.Error()).Error(), http.StatusBadRequest)
+		return
+	}
+
+	resp, err := q.Tag(r.Context(), req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if loghttp.GetVersion(r.RequestURI) == loghttp.VersionV1 {
+		err = marshal.WriteTagResponseJSON(*resp, w)
+	} else {
+		err = marshal_legacy.WriteTagResponseJSON(*resp, w)
+	}
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
+
 // TailHandler is a http.HandlerFunc for handling tail queries.
 func (q *Querier) TailHandler(w http.ResponseWriter, r *http.Request) {
 	upgrader := websocket.Upgrader{
@@ -224,11 +250,16 @@ func parseRegexQuery(httpRequest *http.Request) (string, error) {
 	query := params.Get("query")
 	regexp := params.Get("regexp")
 	if regexp != "" {
+		slashA := strings.Index(regexp, "/")
+		slashB := strings.LastIndex(regexp, "/")
+		if slashA < slashB {
+			query = query + regexp[slashA:slashB+1]
+		}
 		expr, err := logql.ParseLogSelector(query)
 		if err != nil {
 			return "", err
 		}
-		query = logql.NewFilterExpr(expr, labels.MatchRegexp, regexp).String()
+		query = expr.String()
 	}
 	return query, nil
 }

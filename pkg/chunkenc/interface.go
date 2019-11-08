@@ -5,6 +5,8 @@ import (
 	"io"
 	"time"
 
+	"github.com/cortexproject/cortex/pkg/chunk"
+
 	"github.com/grafana/loki/pkg/iter"
 	"github.com/grafana/loki/pkg/logproto"
 	"github.com/grafana/loki/pkg/logql"
@@ -52,6 +54,7 @@ type Chunk interface {
 	Bytes() ([]byte, error)
 	Utilization() float64
 	UncompressedSize() int
+	Tags() chunk.TagMatchers
 }
 
 // CompressionWriter is the writer that compresses the data passed to it.

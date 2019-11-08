@@ -8,11 +8,13 @@ import (
 	"io"
 
 	"github.com/gorilla/websocket"
+
 	loghttp "github.com/grafana/loki/pkg/loghttp/legacy"
 	"github.com/grafana/loki/pkg/logproto"
 
-	"github.com/grafana/loki/pkg/logql"
 	"github.com/prometheus/prometheus/promql"
+
+	"github.com/grafana/loki/pkg/logql"
 )
 
 // Note that the below methods directly marshal the values passed in.  This is because these objects currently marshal
@@ -35,6 +37,9 @@ func WriteQueryResponseJSON(v promql.Value, w io.Writer) error {
 
 // WriteLabelResponseJSON marshals the logproto.LabelResponse to legacy loghttp JSON and then writes it to the provided writer
 func WriteLabelResponseJSON(l logproto.LabelResponse, w io.Writer) error {
+	return json.NewEncoder(w).Encode(l)
+}
+func WriteTagResponseJSON(l logproto.TagResponse, w io.Writer) error {
 	return json.NewEncoder(w).Encode(l)
 }
 

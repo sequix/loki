@@ -24,6 +24,7 @@ var tokens = map[string]int{
 	OpTypeCountOverTime: COUNT_OVER_TIME,
 	"[":                 OPEN_BRACKET,
 	"]":                 CLOSE_BRACKET,
+	"/":                 SLASH,
 	OpTypeRate:          RATE,
 	OpTypeSum:           SUM,
 	OpTypeAvg:           AVG,

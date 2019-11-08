@@ -226,6 +226,36 @@ func (q *Querier) Label(ctx context.Context, req *logproto.LabelRequest) (*logpr
 	}, nil
 }
 
+// Label does the heavy lifting for a Label query.
+func (q *Querier) Tag(ctx context.Context, req *logproto.TagRequest) (*logproto.TagResponse, error) {
+	// Enforce the query timeout while querying backends
+	ctx, cancel := context.WithDeadline(ctx, time.Now().Add(q.cfg.QueryTimeout))
+	defer cancel()
+
+	userID, err := user.ExtractOrgID(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	from, through := model.TimeFromUnixNano(req.Start.UnixNano()), model.TimeFromUnixNano(req.End.UnixNano())
+	var storeValues []string
+	if req.Values {
+		storeValues, err = q.store.TagValues(ctx, userID, from, through, req.Name)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		storeValues, err = q.store.TagNames(ctx, userID, from, through)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return &logproto.TagResponse{
+		Values: storeValues,
+	}, nil
+}
+
 // Check implements the grpc healthcheck
 func (*Querier) Check(_ context.Context, _ *grpc_health_v1.HealthCheckRequest) (*grpc_health_v1.HealthCheckResponse, error) {
 	return &grpc_health_v1.HealthCheckResponse{Status: grpc_health_v1.HealthCheckResponse_SERVING}, nil

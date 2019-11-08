@@ -49,7 +49,7 @@ func ParseMatchers(input string) ([]*labels.Matcher, error) {
 	if err != nil {
 		return nil, err
 	}
-	matcherExpr, ok := expr.(*matchersExpr)
+	matcherExpr, ok := expr.(*rootExpr)
 	if !ok {
 		return nil, errors.New("only label matchers is supported")
 	}

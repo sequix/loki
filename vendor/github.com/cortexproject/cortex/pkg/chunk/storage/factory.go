@@ -7,15 +7,23 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-kit/kit/log/level"
+	"github.com/pkg/errors"
+
 	"github.com/cortexproject/cortex/pkg/chunk"
 	"github.com/cortexproject/cortex/pkg/chunk/aws"
+	"github.com/cortexproject/cortex/pkg/chunk/baidu"
 	"github.com/cortexproject/cortex/pkg/chunk/cache"
 	"github.com/cortexproject/cortex/pkg/chunk/cassandra"
 	"github.com/cortexproject/cortex/pkg/chunk/gcp"
 	"github.com/cortexproject/cortex/pkg/chunk/local"
 	"github.com/cortexproject/cortex/pkg/util"
-	"github.com/go-kit/kit/log/level"
-	"github.com/pkg/errors"
+)
+
+// Supported storage engines
+const (
+	StorageEngineChunks = "chunks"
+	StorageEngineTSDB   = "tsdb"
 )
 
 // StoreLimits helps get Limits specific to Queries for Stores
@@ -27,14 +35,17 @@ type StoreLimits interface {
 
 // Config chooses which storage client to use.
 type Config struct {
+	Engine                 string             `yaml:"engine"`
 	AWSStorageConfig       aws.StorageConfig  `yaml:"aws"`
 	GCPStorageConfig       gcp.Config         `yaml:"bigtable"`
 	GCSConfig              gcp.GCSConfig      `yaml:"gcs"`
 	CassandraStorageConfig cassandra.Config   `yaml:"cassandra"`
 	BoltDBConfig           local.BoltDBConfig `yaml:"boltdb"`
 	FSConfig               local.FSConfig     `yaml:"filesystem"`
+	BOSConfig              baidu.BOSConfig    `yaml:"bos"`
+	BTSConfig              baidu.BTSConfig    `yaml:"bts"`
 
-	IndexCacheValidity time.Duration
+	IndexCacheValidity time.Duration `yaml:"index_cache_validity,omitempty"`
 
 	IndexQueriesCacheConfig cache.Config `yaml:"index_queries_cache_config,omitempty"`
 }
@@ -48,8 +59,18 @@ func (cfg *Config) RegisterFlags(f *flag.FlagSet) {
 	cfg.BoltDBConfig.RegisterFlags(f)
 	cfg.FSConfig.RegisterFlags(f)
 
+	f.StringVar(&cfg.Engine, "store.engine", "chunks", "The storage engine to use: chunks or tsdb. Be aware tsdb is experimental and shouldn't be used in production.")
 	cfg.IndexQueriesCacheConfig.RegisterFlagsWithPrefix("store.index-cache-read.", "Cache config for index entry reading. ", f)
 	f.DurationVar(&cfg.IndexCacheValidity, "store.index-cache-validity", 5*time.Minute, "Cache validity for active index entries. Should be no higher than -ingester.max-chunk-idle.")
+}
+
+// Validate config and returns error on failure
+func (cfg *Config) Validate() error {
+	if cfg.Engine != StorageEngineChunks && cfg.Engine != StorageEngineTSDB {
+		return errors.New("unsupported storage engine")
+	}
+
+	return nil
 }
 
 // NewStore makes the storage clients based on the configuration.
@@ -120,6 +141,8 @@ func NewIndexClient(name string, cfg Config, schemaCfg chunk.SchemaConfig) (chun
 		return cassandra.NewStorageClient(cfg.CassandraStorageConfig, schemaCfg)
 	case "boltdb":
 		return local.NewBoltDBIndexClient(cfg.BoltDBConfig)
+	case "bts":
+		return baidu.NewIndexClient(cfg.BTSConfig)
 	default:
 		return nil, fmt.Errorf("Unrecognized storage client %v, choose one of: aws, cassandra, inmemory, gcp, bigtable, bigtable-hashed", name)
 	}
@@ -152,6 +175,8 @@ func NewObjectClient(name string, cfg Config, schemaCfg chunk.SchemaConfig) (chu
 		return cassandra.NewStorageClient(cfg.CassandraStorageConfig, schemaCfg)
 	case "filesystem":
 		return local.NewFSObjectClient(cfg.FSConfig)
+	case "bos":
+		return baidu.NewObjectClient(cfg.BOSConfig)
 	default:
 		return nil, fmt.Errorf("Unrecognized storage client %v, choose one of: aws, cassandra, inmemory, gcp, bigtable, bigtable-hashed", name)
 	}
@@ -177,6 +202,8 @@ func NewTableClient(name string, cfg Config) (chunk.TableClient, error) {
 		return cassandra.NewTableClient(context.Background(), cfg.CassandraStorageConfig)
 	case "boltdb":
 		return local.NewTableClient(cfg.BoltDBConfig.Directory)
+	case "bts":
+		return chunk.NewMockStorage(), nil
 	default:
 		return nil, fmt.Errorf("Unrecognized storage client %v, choose one of: aws, cassandra, inmemory, gcp, bigtable, bigtable-hashed", name)
 	}

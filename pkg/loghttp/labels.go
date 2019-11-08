@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
+
 	"github.com/grafana/loki/pkg/logproto"
 )
 
@@ -46,6 +47,23 @@ func (l LabelSet) String() string {
 func ParseLabelQuery(r *http.Request) (*logproto.LabelRequest, error) {
 	name, ok := mux.Vars(r)["name"]
 	req := &logproto.LabelRequest{
+		Values: ok,
+		Name:   name,
+	}
+
+	start, end, err := bounds(r)
+	if err != nil {
+		return nil, err
+	}
+	req.Start = &start
+	req.End = &end
+	return req, nil
+}
+
+// ParseLabelQuery parses a TagRequest request from an http request.
+func ParseTagQuery(r *http.Request) (*logproto.TagRequest, error) {
+	name, ok := mux.Vars(r)["name"]
+	req := &logproto.TagRequest{
 		Values: ok,
 		Name:   name,
 	}

@@ -9,10 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/grafana/loki/pkg/iter"
-	"github.com/grafana/loki/pkg/logproto"
+	"github.com/cortexproject/cortex/pkg/chunk"
 	"github.com/prometheus/prometheus/pkg/labels"
 	"github.com/prometheus/prometheus/promql"
+
+	"github.com/grafana/loki/pkg/iter"
+	"github.com/grafana/loki/pkg/logproto"
 )
 
 // Expr is the root expression which can be a SampleExpr or LogSelectorExpr
@@ -43,43 +45,83 @@ type Querier interface {
 	Select(context.Context, SelectParams) (iter.EntryIterator, error)
 }
 
+// 只留下返回true的log lines
 // Filter is a function to filter logs.
 type Filter func(line []byte) bool
 
+func mustNewTagMatcher(n, v string) *chunk.TagMatcher {
+	return &chunk.TagMatcher{
+		Name:  n,
+		Value: v,
+	}
+}
+
 // LogSelectorExpr is a LogQL expression filtering and returning logs.
 type LogSelectorExpr interface {
+	Tags() []*chunk.TagMatcher
 	Filter() (Filter, error)
 	Matchers() []*labels.Matcher
 	fmt.Stringer
 }
 
-type matchersExpr struct {
+type rootExpr struct {
 	matchers []*labels.Matcher
+	tags     []*chunk.TagMatcher
 }
 
-func newMatcherExpr(matchers []*labels.Matcher) LogSelectorExpr {
-	return &matchersExpr{matchers: matchers}
+func newRootExpr(matchers []*labels.Matcher, tags []*chunk.TagMatcher) LogSelectorExpr {
+	return &rootExpr{
+		matchers: matchers,
+		tags:     tags,
+	}
 }
 
-func (e *matchersExpr) Matchers() []*labels.Matcher {
+func (e *rootExpr) Tags() []*chunk.TagMatcher {
+	return e.tags
+}
+
+func (e *rootExpr) Matchers() []*labels.Matcher {
 	return e.matchers
 }
 
-func (e *matchersExpr) String() string {
+func (e *rootExpr) String() string {
 	var sb strings.Builder
-	sb.WriteString("{")
-	for i, m := range e.matchers {
-		sb.WriteString(m.String())
-		if i+1 != len(e.matchers) {
-			sb.WriteString(",")
+	if len(e.matchers) > 0 {
+		sb.WriteString("{")
+		for i, m := range e.matchers {
+			sb.WriteString(m.String())
+			if i+1 != len(e.matchers) {
+				sb.WriteString(",")
+			}
 		}
+		sb.WriteString("}")
 	}
-	sb.WriteString("}")
+
+	if len(e.tags) > 0 {
+		sb.WriteString("/")
+		for i, t := range e.tags {
+			sb.WriteString(t.String())
+			if i+1 != len(e.tags) {
+				sb.WriteString(",")
+			}
+		}
+		sb.WriteString("/")
+	}
 	return sb.String()
 }
 
-func (e *matchersExpr) Filter() (Filter, error) {
-	return nil, nil
+func (e *rootExpr) Filter() (Filter, error) {
+	if len(e.tags) == 0 {
+		return nil, nil
+	}
+	return func(line []byte) bool {
+		for _, t := range e.tags {
+			if !bytes.Contains(line, []byte(t.Value)) {
+				return false
+			}
+		}
+		return true
+	}, nil
 }
 
 type filterExpr struct {
@@ -95,6 +137,10 @@ func NewFilterExpr(left LogSelectorExpr, ty labels.MatchType, match string) LogS
 		ty:    ty,
 		match: match,
 	}
+}
+
+func (e *filterExpr) Tags() []*chunk.TagMatcher {
+	return e.left.Tags()
 }
 
 func (e *filterExpr) Matchers() []*labels.Matcher {
@@ -150,15 +196,9 @@ func (e *filterExpr) Filter() (Filter, error) {
 	default:
 		return nil, fmt.Errorf("unknown matcher: %v", e.match)
 	}
-	next, ok := e.left.(*filterExpr)
-	if ok {
-		nextFilter, err := next.Filter()
-		if err != nil {
-			return nil, err
-		}
-		return func(line []byte) bool {
-			return nextFilter(line) && f(line)
-		}, nil
+	nf, err := e.left.Filter()
+	if err == nil && nf != nil {
+		return func(line []byte) bool { return nf(line) && f(line) }, nil
 	}
 	return f, nil
 }

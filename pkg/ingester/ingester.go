@@ -123,6 +123,7 @@ func New(cfg Config, clientConfig client.Config, store ChunkStore, limits *valid
 	if err != nil {
 		return nil, err
 	}
+	i.lifecycler.Start()
 
 	i.done.Add(1)
 	go i.loop()
@@ -213,6 +214,11 @@ func (i *Ingester) Label(ctx context.Context, req *logproto.LabelRequest) (*logp
 
 	instance := i.getOrCreateInstance(instanceID)
 	return instance.Label(ctx, req)
+}
+
+// Label returns the set of labels for the stream this ingester knows about.
+func (i *Ingester) Tag(ctx context.Context, req *logproto.TagRequest) (*logproto.TagResponse, error) {
+	return nil, chunk.ErrNotSupported
 }
 
 // Check implements grpc_health_v1.HealthCheck.
